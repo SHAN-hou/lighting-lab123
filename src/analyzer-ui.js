@@ -77,6 +77,7 @@ export function initAnalyzer(root, { state, onResult, onReference }) {
       <ul class="plan">${planLines(state).map((p) => `<li><i class="dot" style="--c:${p.spec.color}"></i><b>${p.spec.label}</b>${esc(p.text)}</li>`).join('')}</ul>
       ${ai.reasons?.length ? `<h4>AI 的判断理由</h4><ul>${ai.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
       ${notes.length ? `<h4>自动换算说明</h4><ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+      <details class="raw"><summary>查看 AI 原始结果（排查问题用）</summary><pre>${esc(JSON.stringify(ai, null, 2))}</pre></details>
       <p class="tip">已自动载入下方的灯光参数。对照"参考原图"和"相机成片"，觉得哪里不像可以直接拖滑块微调。</p>
       <button type="button" data-act="retry">重新分析</button>`;
   }

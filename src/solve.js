@@ -6,8 +6,21 @@ import * as P from './physics.js';
 const clamp = THREE.MathUtils.clamp;
 const num = (v, d) => (Number.isFinite(+v) ? +v : d);
 const wrapAz = (a) => Math.round((((num(a, 0) + 180) % 360 + 360) % 360 - 180) / 5) * 5;
-const height = (h, d) => Math.round(clamp(P.FACE.y + num(h, d), 0.3, 3) * 20) / 20;
 const round = (v, s) => Math.round(v / s) * s;
+const DEG = Math.PI / 180;
+
+// 按仰角摆灯：d3 = 灯到脸的直线距离，换算成"离地高度 + 水平距离"
+// 兼容旧格式：只给了 height（比脸高多少米）时按水平 1.2m 推算仰角
+function place(l, o, d3, defElev) {
+  const elev = o.elev != null ? num(o.elev, defElev) : o.height != null ? Math.atan2(num(o.height, 0), 1.2) / DEG : defElev;
+  const e = clamp(elev, -60, 88) * DEG;
+  l.height = round(clamp(P.FACE.y + d3 * Math.sin(e), 0.3, 3), 0.05);
+  const dy = l.height - P.FACE.y;
+  // 灯被限高（3m）或碰到地面时，把灯往里收，尽量保持仰角
+  const limited = Math.abs(dy - d3 * Math.sin(e)) > 0.03 && Math.abs(Math.tan(e)) > 0.05;
+  l.dist = round(clamp(limited ? Math.abs(dy / Math.tan(e)) : d3 * Math.cos(e), 0.2, 4), 0.05);
+  return l;
+}
 
 // 在 [lo, hi] 中二分查找 x，使 f(x) ≈ target（f 单调）
 function bisect(f, lo, hi, target, iters = 22) {
@@ -33,26 +46,27 @@ export function solveLighting(ai, state) {
   const soft = k.softness || 'soft';
   const keyAz = wrapAz(k.az ?? 40);
   const L = state.lights;
-  L.key = {
+  L.key = place({
     on: true, power: 70, cct: cct(k.cct, 'key'),
     mod: soft === 'hard' ? 'reflector' : k.spill_control ? 'grid' : 'softbox',
-    az: keyAz, height: height(k.height, 0.4), dist: soft === 'soft' ? 1.1 : soft === 'medium' ? 1.7 : 2.0,
-    target: 'face', rgb: false, hue: 300, sat: 1,
-  };
-  if (soft === 'medium') notes.push('参考图的光"不软不硬"：主灯用柔光箱但放远一些（1.7m），光会比贴近时硬一点。');
+    az: keyAz, target: 'face', rgb: false, hue: 300, sat: 1,
+  }, k, soft === 'soft' ? 1.2 : soft === 'medium' ? 1.8 : 2.0, 30);
+  if (soft === 'medium') notes.push('参考图的光"不软不硬"：主灯用柔光箱但放远一些（约 1.8m），光会比贴近时硬一点。');
+  const keyElev = Math.atan2(L.key.height - P.FACE.y, L.key.dist) / DEG;
+  if (keyElev > 60) notes.push(`这是顶光：主灯几乎在头顶正上方（仰角约 ${Math.round(keyElev)}°），实际拍摄需要用横臂（悬臂）灯架把灯伸到人物头顶。`);
 
   // ---------- 辅灯：按目标光比反推亮度 ----------
   const ratio = clamp(num(ai.ratio, 3), 1.1, 16);
   const fillAz = f.az != null ? wrapAz(f.az) : keyAz >= 0 ? -40 : 40;
-  L.fill = {
+  L.fill = place({
     on: ratio < 10, power: 30, cct: cct(f.cct ?? k.cct, 'fill'), mod: 'softbox',
-    az: fillAz, height: height(f.height, 0), dist: 1.5, target: 'face', rgb: false, hue: 300, sat: 1,
-  };
-  L.rim = {
+    az: fillAz, target: 'face', rgb: false, hue: 300, sat: 1,
+  }, f, 1.5, 0);
+  L.rim = place({
     on: false, power: 60, cct: cct(r.cct, 'rim'), mod: 'reflector', az: wrapAz(r.az ?? (keyAz >= 0 ? -145 : 145)),
-    height: height(r.height, 0.5), dist: 1.3, target: r.target === 'bg' ? 'bg' : 'face',
+    target: r.target === 'bg' ? 'bg' : 'face',
     rgb: !!r.rgb, hue: round(clamp(num(r.hue, 300), 0, 360), 1), sat: clamp(num(r.sat, 1), 0, 1),
-  };
+  }, r, 1.3, 25);
 
   state.bg = { color: /^#[0-9a-f]{6}$/i.test(b.paper || '') ? b.paper.toLowerCase() : '#9a9a9a', dist: 1.5 };
 
@@ -89,23 +103,21 @@ export function solveLighting(ai, state) {
   // ---------- 背景：按"背景比脸亮/暗几档"反推 ----------
   const bgStops = clamp(num(b.stops_vs_face, -1.5), -6, 2);
   const wantRatio = (Math.pow(2, bgStops) * SKIN) / albedo(state.bg.color);
-  const bgRatio = () => { const a = P.analyze(state); return a.bgLux / Math.max(a.front, 1e-3); };
+  const bgRatio = () => { const a = P.analyze(state); return a.bgLux / Math.max(a.bright, 1e-3); };
+  // 背景灯藏在人物身后低处，离背景纸 1.5m 左右，光斑够大、背景才均匀
   const lightBg = (rim) => {
-    rim.on = true;
-    rim.power = 100;
-    if (bgRatio() < wantRatio) rim.dist = 0.8;
+    Object.assign(rim, { on: true, target: 'bg', az: 180, height: 1.0, dist: 0.5, mod: 'reflector', power: 100 });
+    state.bg.dist = 2.0;
+    while (bgRatio() < wantRatio && state.bg.dist > 1.2) state.bg.dist = round(state.bg.dist - 0.1, 0.05);
     rim.power = Math.round(clamp(bisect((p) => { rim.power = p; return bgRatio(); }, 1, 100, wantRatio), 1, 100));
   };
 
   if (r.on && L.rim.target === 'bg') {
-    L.rim.az = 175; L.rim.height = 1.2; L.rim.dist = 1.0;
-    state.bg.dist = 1.2;
     lightBg(L.rim);
   } else {
     state.bg.dist = round(clamp(bisect((d) => { state.bg.dist = d; return bgRatio(); }, 0.6, 4, wantRatio), 0.6, 4), 0.05);
     if (bgRatio() < wantRatio * 0.7 && !rimToFace) {
-      Object.assign(L.rim, { target: 'bg', az: 175, height: 1.2, dist: 1.0, rgb: false });
-      state.bg.dist = 1.2;
+      L.rim.rgb = false;
       lightBg(L.rim);
       notes.push('参考图背景比较亮，单靠主灯溢出的光不够，所以把轮廓灯转过去专门照背景。');
     } else if (bgRatio() > wantRatio * 1.5) {

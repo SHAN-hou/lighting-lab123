@@ -412,9 +412,10 @@ const analyzer = initAnalyzer(document.getElementById('panel'), { state, onResul
 const params = new URLSearchParams(location.search);
 applyPreset(PRESETS.find((p) => p.id === params.get('preset')) || PRESETS[0]);
 if (import.meta.env.DEV && params.has('mock')) {
-  import('./mock.js').then(({ MOCK, MOCK_REF }) => {
-    showReference(MOCK_REF);
-    analyzer.renderResult(MOCK, applyAnalysis(MOCK));
+  import('./mock.js').then(({ MOCKS }) => {
+    const m = MOCKS[params.get('mock')] || MOCKS.vogue;
+    showReference(m.ref);
+    analyzer.renderResult(m.ai, applyAnalysis(m.ai));
   });
 }
 resize();

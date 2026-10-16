@@ -156,7 +156,7 @@ export function buildPanel(root, state, { onChange, applyPreset, PRESETS }) {
         tip: '人脸约 1.6 米高。灯越高，鼻子、下巴的影子越往下拉长；低于脸会很诡异（"恐怖片光"）。',
       }),
       range({
-        label: '水平距离', min: 0.5, max: 4, step: 0.05,
+        label: '水平距离', min: 0.2, max: 4, step: 0.05,
         get: () => L().dist, set: mut((v) => (L().dist = v)),
         fmt: (v) => `${v.toFixed(2)}m`,
         tip: '距离翻倍，照到脸上的光只剩 1/4（平方反比定律）。柔光箱离得越近，光越柔。',
@@ -253,7 +253,7 @@ export function renderReadout(el, state, a, hist) {
   if (hist && hist.clip > 0.03) tips.push(`成片约 ${(hist.clip * 100).toFixed(0)}% 的区域已经"死白"，那里的细节找不回来了。`);
   if (!tips.length) tips.push('一切正常。试着只改一个参数，对比成片前后的变化，这是学布光最快的方法。');
 
-  const bgStops = a.front > 0 && a.bgLux > 0 ? Math.log2(a.bgLux / a.front) : -Infinity;
+  const bgStops = a.bright > 0 && a.bgLux > 0 ? Math.log2(a.bgLux / a.bright) : -Infinity;
   const bgText = !isFinite(bgStops) ? '几乎没有光' : Math.abs(bgStops) < 0.3 ? '和脸差不多亮' : bgStops > 0 ? `比脸亮 ${bgStops.toFixed(1)} 档` : `比脸暗 ${(-bgStops).toFixed(1)} 档`;
 
   el.innerHTML = `

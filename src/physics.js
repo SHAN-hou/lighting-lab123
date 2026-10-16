@@ -154,13 +154,17 @@ export function autoExpose(cam, lux, bias = 0) {
 export const FACE_FRONT = new THREE.Vector3(0, 0.1, 1).normalize();
 export const CHEEK_R = new THREE.Vector3(Math.sin(1), 0.12, Math.cos(1)).normalize();
 export const CHEEK_L = new THREE.Vector3(-Math.sin(1), 0.12, Math.cos(1)).normalize();
+// 眼窝、鼻下、下巴下（朝下的面）与额头（朝上的面），用来衡量顶光/底光造成的上下明暗
+export const FACE_UNDER = new THREE.Vector3(0, -0.6, 0.8).normalize();
+export const FACE_UPPER = new THREE.Vector3(0, 0.6, 0.8).normalize();
 
 export function analyze(state) {
   const { lights, bg } = state;
   const ids = Object.keys(lights);
   const per = {};
-  let front = 0, r = 0, lft = 0;
-  const bgPt = new THREE.Vector3(0, 1.5, -bg.dist);
+  let front = 0, r = 0, lft = 0, under = 0, upper = 0;
+  // 背景取成片画面里能看到的 5 个点求平均（中心 + 四角）
+  const bgPts = [[0, 1.55], [-0.45, 1.85], [0.45, 1.85], [-0.45, 1.25], [0.45, 1.25]].map(([x, y]) => new THREE.Vector3(x, y, -bg.dist));
   const bgN = new THREE.Vector3(0, 0, 1);
   let bgLux = 0;
   for (const id of ids) {
@@ -170,14 +174,17 @@ export function analyze(state) {
     front += domeAt(id, l, bg.dist, FACE, FACE_FRONT);
     r += illuminanceAt(id, l, bg.dist, FACE, CHEEK_R);
     lft += illuminanceAt(id, l, bg.dist, FACE, CHEEK_L);
-    bgLux += illuminanceAt(id, l, bg.dist, bgPt, bgN);
+    under += illuminanceAt(id, l, bg.dist, FACE, FACE_UNDER);
+    upper += illuminanceAt(id, l, bg.dist, FACE, FACE_UPPER);
+    for (const p of bgPts) bgLux += illuminanceAt(id, l, bg.dist, p, bgN) / bgPts.length;
   }
-  const bright = Math.max(r, lft);
-  const dark = Math.min(r, lft);
+  const bright = Math.max(r, lft, upper);
+  const dark = Math.min(r, lft, under);
+  const vertical = dark === under && under < Math.min(r, lft) * 0.8;
   return {
-    per, front, bgLux,
+    per, front, bgLux, bright,
     ratio: dark > 0.5 ? bright / dark : Infinity,
-    brightSide: r >= lft ? '画面右侧' : '画面左侧',
+    brightSide: vertical ? '脸的上半部（暗面在眼窝、鼻下、下巴下）' : r >= lft ? '画面右侧' : '画面左侧',
     ev: front > 0 ? Math.log2(front / exposureLux(state.cam)) : -Infinity,
   };
 }
