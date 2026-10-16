@@ -3,3 +3,4 @@ dist
 .shot*.png
 .log.txt
 src/mock-ref*.png
+.gt

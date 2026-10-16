@@ -65,7 +65,7 @@ function makeTop(topY) {
     [0.235, topY - 0.16], [0.2, topY - 0.24], [0, topY - 0.25],
   ].map(([r, y]) => new THREE.Vector2(r, y));
   const g = new THREE.LatheGeometry(pts, 64);
-  g.scale(1, 1, 0.44);
+  g.scale(1, 1, 0.62);
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.85 }));
   m.position.z = -0.04;
   m.castShadow = true;
@@ -399,9 +399,9 @@ function showReference(url) {
   setMode('split');
 }
 
-function applyAnalysis(ai) {
+function applyAnalysis(ai, px) {
   state.presetId = null;
-  const notes = solveLighting(ai, state);
+  const notes = solveLighting(ai, state, px);
   panel.refresh();
   invalidate();
   return notes;
@@ -410,7 +410,22 @@ function applyAnalysis(ai) {
 const analyzer = initAnalyzer(document.getElementById('panel'), { state, onResult: applyAnalysis, onReference: showReference });
 
 const params = new URLSearchParams(location.search);
+if (params.has('photoonly')) document.body.classList.add('photo-only');
 applyPreset(PRESETS.find((p) => p.id === params.get('preset')) || PRESETS[0]);
+// 开发调试：?autotest=名字 → 用 .gt/名字.png 跑一遍完整的真实分析（密钥取自启动时的 VITE_TEST_KEY 环境变量）
+if (import.meta.env.DEV && params.has('autotest') && import.meta.env.VITE_TEST_KEY) {
+  (async () => {
+    const { saveSettings, PROVIDERS, fileToDataURL } = await import('./analyze.js');
+    saveSettings({ provider: 'deepseek', ...PROVIDERS.deepseek, apiKey: import.meta.env.VITE_TEST_KEY });
+    const blob = await (await fetch(`/.gt/${params.get('autotest')}.png`)).blob();
+    await analyzer.run(await fileToDataURL(blob));
+    const probe = document.createElement('canvas').getContext('2d');
+    probe.canvas.width = probe.canvas.height = 16;
+    probe.drawImage(photoCanvas, 0, 0, 16, 16);
+    const canvasSum = probe.getImageData(0, 0, 16, 16).data.reduce((s, v, i) => (i % 4 === 3 ? s : s + v), 0);
+    console.warn('AUTOTEST', JSON.stringify({ canvasSum, px: analyzer.lastPx, lights: state.lights, bg: state.bg, notes: [...document.querySelectorAll('.an-result li')].map((li) => li.innerText).slice(-4), status: document.querySelector('.an-status')?.innerText }));
+  })();
+}
 if (import.meta.env.DEV && params.has('mock')) {
   import('./mock.js').then(({ MOCKS }) => {
     const m = MOCKS[params.get('mock')] || MOCKS.vogue;

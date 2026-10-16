@@ -188,6 +188,14 @@ body.dropping .drop-hint {
 .ai-form a { color: var(--accent); }
 .ai-form .btn-row { margin-top: 12px; }
 
+/* 调试用 ?photoonly：只显示成片，便于截图做准确度测试 */
+.photo-only .top, .photo-only .panel, .photo-only .readout, .photo-only .view-tabs, .photo-only .view-scene, .photo-only .view-ref,
+.photo-only .view-title, .photo-only .exif { display: none !important; }
+.photo-only .layout { display: block; height: 100vh; }
+.photo-only .stage { padding: 0; height: 100%; }
+.photo-only .views { display: block; height: 100%; }
+.photo-only .view-photo { height: 100%; border-radius: 0; }
+
 /* ---------- 帮助 ---------- */
 dialog { max-width: 620px; width: calc(100% - 24px); max-height: calc(100% - 24px); border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); padding: 0; }
 dialog::backdrop { background: rgba(0, 0, 0, .65); }

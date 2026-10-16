@@ -184,6 +184,7 @@ export function analyze(state) {
   return {
     per, front, bgLux, bright,
     ratio: dark > 0.5 ? bright / dark : Infinity,
+    ratioH: Math.min(r, lft) > 0.5 ? Math.max(r, lft) / Math.min(r, lft) : Infinity,
     brightSide: vertical ? '脸的上半部（暗面在眼窝、鼻下、下巴下）' : r >= lft ? '画面右侧' : '画面左侧',
     ev: front > 0 ? Math.log2(front / exposureLux(state.cam)) : -Infinity,
   };

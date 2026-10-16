@@ -34,13 +34,37 @@ function bisect(f, lo, hi, target, iters = 22) {
 
 const albedo = (hex) => {
   const c = new THREE.Color().setStyle(hex, THREE.SRGBColorSpace);
-  return Math.max(0.02, 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
+  return Math.max(0.04, 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
 };
 const SKIN = 0.35;
 
-export function solveLighting(ai, state) {
+export function solveLighting(ai, state, px = {}) {
   const notes = [];
-  const k = ai.key || {}, f = ai.fill || {}, r = ai.rim || {}, b = ai.background || {};
+  const k = { ...ai.key }, f = { ...ai.fill }, r = { ...ai.rim }, b = { ...ai.background };
+
+  // ---------- 用实测像素校正 AI ----------
+  // 左右：AI 偶尔把灯放反，以实测的左右半脸亮度为准
+  const aiSide = Math.sign(num(k.az, 0));
+  if (Number.isFinite(px.sideStops) && Math.abs(px.sideStops) > 0.3 && Math.abs(num(k.az, 0)) >= 10 && Math.sign(px.sideStops) !== aiSide) {
+    // 只翻主灯和辅灯；轮廓灯在人物后方，AI 对它的左右判断通常独立且更可靠
+    for (const o of [k, f]) if (o.az != null) o.az = -num(o.az, 0);
+    notes.push(`实测参考图画面${px.sideStops > 0 ? '右' : '左'}半边脸更亮（约 ${Math.abs(px.sideStops).toFixed(1)} 档），AI 把主灯放反了，已自动换到${px.sideStops > 0 ? '右' : '左'}侧。`);
+  }
+  // 背景亮暗：直接用实测值，比 AI 估计可靠
+  if (Number.isFinite(px.bgStops)) {
+    const aiStops = num(b.stops_vs_face, NaN);
+    b.stops_vs_face = px.bgStops;
+    if (Number.isFinite(aiStops) && Math.abs(aiStops - px.bgStops) > 1) notes.push(`背景亮度按实测：比脸部亮面${px.bgStops < 0 ? `暗 ${(-px.bgStops).toFixed(1)}` : `亮 ${px.bgStops.toFixed(1)}`} 档（AI 估计 ${aiStops} 档）。`);
+  }
+  if (typeof px.bw === 'boolean') ai = { ...ai, bw: px.bw };
+  // 仰角：实测眼窝比额头暗很多 → 顶光；否则 AI 对仰角普遍高估 15–20°（实测校准），按 0.65 倍收回
+  if (Number.isFinite(px.eyeStops) && k.elev != null) {
+    const e = num(k.elev, 30);
+    if (px.eyeStops < -2 && e < 60) {
+      k.elev = 70;
+      notes.push(`实测眼窝一带比额头暗 ${(-px.eyeStops).toFixed(1)} 档，这是顶光的特征，主灯仰角上调到约 70°。`);
+    } else if (e > 0 && e < 60) k.elev = e * THREE.MathUtils.lerp(0.65, 1, THREE.MathUtils.smoothstep(-px.eyeStops, 1.2, 2));
+  }
   const cct = (v, id) => round(clamp(num(v, 5600), ...P.LIGHT_SPECS[id].cct), 50);
 
   const soft = k.softness || 'soft';
@@ -51,7 +75,7 @@ export function solveLighting(ai, state) {
     mod: soft === 'hard' ? 'reflector' : k.spill_control ? 'grid' : 'softbox',
     az: keyAz, target: 'face', rgb: false, hue: 300, sat: 1,
   }, k, soft === 'soft' ? 1.2 : soft === 'medium' ? 1.8 : 2.0, 30);
-  if (soft === 'medium') notes.push('参考图的光"不软不硬"：主灯用柔光箱但放远一些（约 1.8m），光会比贴近时硬一点。');
+  if (soft === 'medium' && L.key.mod === 'softbox') notes.push('参考图的光"不软不硬"：主灯用柔光箱但放远一些（约 1.8m），光会比贴近时硬一点。');
   const keyElev = Math.atan2(L.key.height - P.FACE.y, L.key.dist) / DEG;
   if (keyElev > 60) notes.push(`这是顶光：主灯几乎在头顶正上方（仰角约 ${Math.round(keyElev)}°），实际拍摄需要用横臂（悬臂）灯架把灯伸到人物头顶。`);
 
@@ -70,7 +94,9 @@ export function solveLighting(ai, state) {
 
   state.bg = { color: /^#[0-9a-f]{6}$/i.test(b.paper || '') ? b.paper.toLowerCase() : '#9a9a9a', dist: 1.5 };
 
-  const ratioAt = () => P.analyze(state).ratio;
+  // 侧光时"光比"指左右脸；正面/顶光时暗面在眼窝鼻下，用上下方向一起算
+  const vertical = Math.abs(keyAz) < 15;
+  const ratioAt = () => { const a = P.analyze(state); return vertical ? a.ratio : a.ratioH; };
   if (L.fill.on) {
     if (f.on === false) notes.push(`参考图暗面并不全黑（光比约 ${ratio}:1），实际可能用了反光板补光，这里用辅灯代替。`);
     const fl = L.fill;
@@ -79,6 +105,11 @@ export function solveLighting(ai, state) {
     fl.power = 1;
     while (ratioAt() < ratio && fl.dist < 4) fl.dist = round(fl.dist + 0.2, 0.05);
     fl.power = Math.round(clamp(bisect((p) => { fl.power = p; return ratioAt(); }, 1, 100, ratio), 1, 100));
+    if (fl.power <= 3 && fl.dist >= 3.5) {
+      fl.on = false;
+      Object.assign(fl, { power: 30, dist: 1.5 });
+      notes.push('主灯本身已经能形成参考图这样的明暗反差，不需要再开辅灯。');
+    }
   } else if (f.on !== false) {
     notes.push('暗面几乎全黑，所以不开辅灯。');
   }
@@ -116,7 +147,7 @@ export function solveLighting(ai, state) {
     lightBg(L.rim);
   } else {
     state.bg.dist = round(clamp(bisect((d) => { state.bg.dist = d; return bgRatio(); }, 0.6, 4, wantRatio), 0.6, 4), 0.05);
-    if (bgRatio() < wantRatio * 0.7 && !rimToFace) {
+    if (bgStops > -3 && bgRatio() < wantRatio * 0.7 && !rimToFace) {
       L.rim.rgb = false;
       lightBg(L.rim);
       notes.push('参考图背景比较亮，单靠主灯溢出的光不够，所以把轮廓灯转过去专门照背景。');

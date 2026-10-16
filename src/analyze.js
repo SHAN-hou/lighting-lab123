@@ -41,8 +41,9 @@ const PROMPT = `你是资深人像摄影布光师。请分析这张参考照片�
 【可用的灯】主灯（双色温 2700-6500K）、辅灯（双色温 2700-6500K）、轮廓灯（2500-10000K 或 RGB 全彩，可以照人物边缘，也可以转去照背景）。
 
 【判断依据】请逐条观察后再下结论：
-1. 方位：脸的哪一侧更亮、鼻子影子偏向哪边、眼神光在瞳孔哪个位置。鼻子影子在正下方且左右对称 → az 接近 0。
-2. 高度：鼻子影子越长、越往下，光越高；眉骨下眼窝发黑、下巴下和脖子大面积阴影、头顶和肩膀上沿特别亮 → 顶光（elev 65–85）。看不到眼神光也常说明光很高。
+1. 方位：先确定画面左半边脸和右半边脸哪边更亮——主灯就在更亮的那一侧（画面右侧更亮 → az 为正，画面左侧更亮 → az 为负）。注意不要被后脑勺、头顶、耳朵上的轮廓亮边误导，只看脸的正面。再看鼻子影子偏向哪边（影子落在和灯相反的一侧）、眼神光在瞳孔哪个位置。
+   方位角大小看明暗交界线的位置：鼻子影子在正下方、左右对称 → az 约 0；鼻子小影子斜向一边 → ±20–35；暗侧脸颊上有倒三角亮区（伦勃朗）→ ±40–55；交界线正好落在鼻梁上、半张脸全暗（分割光）→ ±80–95；只有脸的边缘被照亮 → ±110 以上。
+2. 高度：常规人像主灯仰角多在 15–40°，不要轻易给出 45° 以上；鼻子影子越长、越往下，光越高；眉骨下眼窝发黑、下巴下和脖子大面积阴影、头顶和肩膀上沿特别亮 → 顶光（elev 65–85）。看不到眼神光也常说明光很高。
 3. 软硬：影子边缘锋利清晰 → hard；有一段柔和过渡 → medium；过渡很宽、几乎看不出边 → soft。
 4. 光比：暗面（眼窝、鼻下、下巴下）还能看到细节吗？完全死黑 → ratio 填 12–16 且 fill.on=false；略有细节 → 4–8；明显补亮 → 1.5–3。
 5. 轮廓光：头发、脸颊、肩膀外缘有没有一道比旁边更亮的边。
@@ -54,6 +55,8 @@ const PROMPT = `你是资深人像摄影布光师。请分析这张参考照片�
   "summary": "一句话概括这张图的布光（中文，给摄影小白看）",
   "pattern": "蝴蝶光|环形光|伦勃朗光|分割光|平光|侧逆光|其他",
   "bw": true/false（是否黑白照片）,
+  "face_box": [x0, y0, x1, y1]（主要人物脸部在图中的范围：额头到下巴、左右到两侧脸颊边缘，用 0–1 的比例表示，左上角为 0,0）,
+  "bright_side": "left|right|even"（观看照片时，画面左半边脸和右半边脸哪边更亮）,
   "key": { "az": 数字, "elev": 数字, "softness": "hard|medium|soft", "spill_control": true/false（光是否被严格控制、背景几乎没被照到）, "cct": 色温K },
   "fill": { "on": true/false, "az": 数字, "elev": 数字, "cct": 色温K },
   "ratio": 数字（脸部亮面 : 暗面 的亮度比，例如 1.5、3、8；暗面全黑填 16）,
@@ -64,7 +67,7 @@ const PROMPT = `你是资深人像摄影布光师。请分析这张参考照片�
 }
 要求：数字都用阿拉伯数字；不要输出 JSON 以外的任何文字。`;
 
-export async function analyzePhoto(dataURL, settings, signal) {
+async function requestOnce(dataURL, settings, signal) {
   if (!settings.apiKey) throw new Error('请先在"AI 设置"里填写 API 密钥');
   const base = settings.baseURL.replace(/\/+$/, '');
   let res;
@@ -96,8 +99,33 @@ export async function analyzePhoto(dataURL, settings, signal) {
     throw new Error(msg || `AI 服务返回错误 ${res.status}：${detail.slice(0, 160)}`);
   }
   const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || '';
+  return parseJSON(data.choices?.[0]?.message?.content || '');
+}
+
+// AI 偶尔会输出带注释、尾逗号或"true/false"这类不规范的 JSON，这里尽量修复
+function parseJSON(text) {
   const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('AI 没有返回有效的分析结果，请重试');
-  return JSON.parse(m[0]);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { /* 尝试修复 */ }
+  const fixed = m[0]
+    .replace(/\/\/[^\n"]*$/gm, '')
+    .replace(/（[^）"]*）/g, '')
+    .replace(/:\s*true\/false/g, ': false')
+    .replace(/,\s*([}\]])/g, '$1');
+  try { return JSON.parse(fixed); } catch { return null; }
+}
+
+export async function analyzePhoto(dataURL, settings, signal) {
+  for (let i = 0; i < 2; i++) {
+    let ai;
+    try {
+      ai = await requestOnce(dataURL, settings, signal);
+    } catch (e) {
+      // 网络偶尔抖动：重试一次；密钥错误、余额不足等直接报错
+      if (i === 0 && e.name !== 'AbortError' && e.message.startsWith('网络')) continue;
+      throw e;
+    }
+    if (ai?.key) return ai;
+  }
+  throw new Error('AI 返回的结果格式不对，请再试一次');
 }

@@ -1,5 +1,6 @@
 import * as P from './physics.js';
 import { PROVIDERS, loadSettings, saveSettings, fileToDataURL, analyzePhoto } from './analyze.js';
+import { measurePhoto } from './pixels.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -52,9 +53,10 @@ export function initAnalyzer(root, { state, onResult, onReference }) {
     if (mobile) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     try {
       const ai = await analyzePhoto(dataURL, settings, controller.signal);
-      const notes = onResult(ai);
+      const px = await measurePhoto(dataURL, ai.face_box).catch(() => ({}));
+      const notes = onResult(ai, px);
       setStatus('');
-      renderResult(ai, notes);
+      renderResult(ai, notes, px);
       if (mobile) window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       if (e.name === 'AbortError') setStatus('已取消。');
@@ -67,7 +69,8 @@ export function initAnalyzer(root, { state, onResult, onReference }) {
     result.innerHTML = '<button type="button" data-act="retry">重新分析</button>';
   }
 
-  function renderResult(ai, notes) {
+  function renderResult(ai, notes, px = {}) {
+    api.lastPx = px;
     const conf = { high: '把握较大', medium: '把握一般', low: '把握较小' }[ai.confidence] || '';
     result.hidden = false;
     result.innerHTML = `
@@ -77,7 +80,7 @@ export function initAnalyzer(root, { state, onResult, onReference }) {
       <ul class="plan">${planLines(state).map((p) => `<li><i class="dot" style="--c:${p.spec.color}"></i><b>${p.spec.label}</b>${esc(p.text)}</li>`).join('')}</ul>
       ${ai.reasons?.length ? `<h4>AI 的判断理由</h4><ul>${ai.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
       ${notes.length ? `<h4>自动换算说明</h4><ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
-      <details class="raw"><summary>查看 AI 原始结果（排查问题用）</summary><pre>${esc(JSON.stringify(ai, null, 2))}</pre></details>
+      <details class="raw"><summary>查看 AI 原始结果（排查问题用）</summary><pre>${esc(JSON.stringify({ ...ai, 实测像素: px }, null, 2))}</pre></details>
       <p class="tip">已自动载入下方的灯光参数。对照"参考原图"和"相机成片"，觉得哪里不像可以直接拖滑块微调。</p>
       <button type="button" data-act="retry">重新分析</button>`;
   }
@@ -132,5 +135,6 @@ export function initAnalyzer(root, { state, onResult, onReference }) {
     saveSettings({ ...loadSettings(), apiKey: '' });
   });
 
-  return { renderResult, run };
+  const api = { renderResult, run, lastPx: null };
+  return api;
 }
