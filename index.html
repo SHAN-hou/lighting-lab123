@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0e1013" />
+    <title>布光练习室 · 人物杂志布光模拟</title>
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand"><b>布光练习室</b><span>人物杂志布光模拟 · 主灯 100W / 辅灯 63W / 轮廓灯 63W RGB</span></div>
+      <div class="btn-row">
+        <button id="pickBtn" type="button" class="primary">分析参考图</button>
+        <button id="helpBtn" type="button">小白入门</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="stage">
+        <div class="view-tabs">
+          <button type="button" data-mode="split" class="on">并排</button>
+          <button type="button" data-mode="scene">现场 3D</button>
+          <button type="button" data-mode="photo">相机成片</button>
+          <button type="button" data-mode="ref" class="ref-tab">参考原图</button>
+        </div>
+        <div class="views mode-split" id="views">
+          <div class="view view-ref">
+            <img id="refImg" alt="参考原图" />
+            <div class="view-title">参考原图</div>
+          </div>
+          <div class="view view-scene">
+            <canvas id="sceneCanvas"></canvas>
+            <div class="labels" id="labels"></div>
+            <div class="view-title">现场 · 拖动旋转 / 滚轮或双指缩放</div>
+          </div>
+          <div class="view view-photo">
+            <div class="photo-frame">
+              <canvas id="photoCanvas"></canvas>
+              <div class="grain" id="grain"></div>
+              <div class="view-title">相机成片 · 85mm</div>
+              <div class="exif" id="exif"></div>
+            </div>
+          </div>
+        </div>
+        <div class="readout" id="readout"></div>
+      </section>
+      <aside class="panel" id="panel"></aside>
+    </main>
+
+    <dialog id="help">
+      <div class="help-body">
+        <h2>3 分钟看懂布光</h2>
+        <p>左边是<b>摄影棚现场</b>（你可以转着看灯摆在哪），右边是<b>相机拍出来的照片</b>。右侧/下方的面板可以调每盏灯。建议先点几个"一键预设"，再一个参数一个参数地改，观察照片怎么变。</p>
+        <dl>
+          <dt>照片分析布光</dt>
+          <dd>右侧面板最上方点<b>"选择参考图"</b>，AI 会分析照片的光，并自动把三盏灯摆好；参考原图和模拟成片会并排显示。第一次使用要先在"AI 设置"里填写 DeepSeek 的 API 密钥。</dd>
+          <dt>三盏灯各管什么？</dt>
+          <dd><b>主灯</b>：最亮，决定光从哪来、影子往哪落。<b>辅灯</b>：把阴影补亮一点，决定脸"有多立体"。<b>轮廓灯</b>：在人背后勾亮边，让人和背景分开。</dd>
+          <dt>照度（lux，勒克斯）</dt>
+          <dd>照到脸上的光有多强。参考：办公室约 500 lux，阴天户外约 1 万 lux。你的主灯带罩 1 米处是 20100 lux。</dd>
+          <dt>平方反比：距离对亮度影响很大</dt>
+          <dd>灯离人的距离翻倍，照到脸上的光只剩 <b>1/4</b>。1 米 → 2 米，20100 lux 会变成约 5000 lux。</dd>
+          <dt>"档"是什么？</dt>
+          <dd>摄影里的亮度单位：<b>亮 1 档 = 光量翻倍，暗 1 档 = 光量减半</b>。光圈、快门、ISO、灯的亮度都可以用"档"来换算。</dd>
+          <dt>软光 vs 硬光</dt>
+          <dd>光源<b>越大</b>（相对于人）越软：影子边缘模糊、皮肤细腻。光源越小越硬：影子锋利、质感强。柔光箱 = 把灯变大。</dd>
+          <dt>色温（K）与白平衡</dt>
+          <dd>2700K 像烛光暖黄，5600K 是日光白，6500K 以上偏冷蓝。相机的白平衡要和灯一致，肤色才正常；故意不一致就能做出冷暖氛围。</dd>
+          <dt>光比</dt>
+          <dd>脸亮面和暗面的亮度比。2:1 柔和，4:1 立体，8:1 以上很戏剧化。</dd>
+        </dl>
+        <p class="muted">说明：照度按"灯正对、1 米处、100% 亮度"计算；附件的光损失（柔光箱约 −1.7 档等）是行业经验估算值，真实数值会因品牌型号不同而略有差异。人头模型：Lee Perry-Smith（Infinite-Realities，CC BY 3.0）。</p>
+        <button type="button" class="primary" data-close>开始练习</button>
+      </div>
+    </dialog>
+
+    <dialog id="aiDialog">
+      <form method="dialog" class="help-body ai-form">
+        <h2>AI 设置</h2>
+        <label>AI 平台<select id="aiProvider"></select></label>
+        <label>接口地址<input id="aiBase" placeholder="https://api.deepseek.com" /></label>
+        <label>模型名称<input id="aiModel" placeholder="deepseek-flash" /></label>
+        <label>API 密钥<input id="aiKey" type="password" autocomplete="off" placeholder="sk-..." /></label>
+        <p class="muted">
+          密钥只保存在<b>这台设备的浏览器</b>里，分析时由浏览器直接发给 AI 平台，不经过任何其他服务器。请不要在公共电脑上保存密钥。<br />
+          还没有密钥？到 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">DeepSeek 开放平台</a> 注册并创建，每分析一张图大约花费几分钱。<br />
+          选"其他"可以接入任何支持看图、兼容 OpenAI 格式、且允许浏览器直接调用的 AI 平台。
+        </p>
+        <div class="btn-row">
+          <button type="submit" id="aiSave" class="primary">保存</button>
+          <button type="submit" value="cancel" formnovalidate>取消</button>
+          <button type="button" id="aiClear">清除密钥</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="drop-hint">松开鼠标，分析这张参考图</div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
